@@ -97,12 +97,15 @@ def handle_message(event):
             # --------------------------------------------------
             twse_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
             print(f"[上市 TWSE] 嘗試下載: {twse_url}")
-            res = httpx.get(twse_url, headers=headers, follow_redirects=True, timeout=10.0)
-            if res.status_code == 200 and res.content.startswith(b"%PDF"):
-                print(f"[上市 TWSE] 成功取得 PDF 檔案！")
-                pdf_content = res.content
-            else:
-                print(f"[上市 TWSE] 查無 PDF (非 PDF 格式)")
+            try:
+                res = httpx.get(twse_url, headers=headers, follow_redirects=True, timeout=10.0)
+                if res.status_code == 200 and res.content.startswith(b"%PDF"):
+                    print(f"[上市 TWSE] 成功取得 PDF 檔案！")
+                    pdf_content = res.content
+                else:
+                    print(f"[上市 TWSE] 查無 PDF (非 PDF 格式)")
+            except Exception as e:
+                print(f"[上市 TWSE] 發生錯誤: {e}")
 
             # --------------------------------------------------
             # 階段 2：嘗試上櫃 (TPEx) 歷史年度 API
@@ -114,9 +117,9 @@ def handle_message(event):
                 
                 for year in range(current_roc_year, current_roc_year - 4, -1):
                     api_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/regular_api.php?stk_code={question}&Syear={year}"
-                    api_res = httpx.get(api_url, headers=headers, timeout=10.0)
-                    if api_res.status_code == 200:
-                        try:
+                    try:
+                        api_res = httpx.get(api_url, headers=headers, timeout=10.0)
+                        if api_res.status_code == 200:
                             api_json = api_res.json()
                             if "aaData" in api_json and len(api_json["aaData"]) > 0:
                                 tpex_pdf_url = None
@@ -140,65 +143,65 @@ def handle_message(event):
                                         print(f"[上櫃 TPEx] 成功取得 PDF 檔案！")
                                         pdf_content = tpex_res.content
                                         break
-                        except Exception as json_err:
-                            pass
+                    except Exception:
+                        pass
 
-# --------------------------------------------------
-            # 階段 3：前兩者皆失敗，調用公開資訊觀測站 (MOPS) API (含歷史年度輪詢)
+            # --------------------------------------------------
+            # 階段 3：前兩者皆失敗，調用公開資訊觀測站 (MOPS) API
             # --------------------------------------------------
             if not pdf_content:
                 print(f"[MOPS 觀測站] 開始從公開資訊觀測站查詢 {question}...")
                 import datetime, re
-                
                 mops_url = "https://mops.twse.com.tw/mops/web/ajax_t100sb07_1"
                 current_roc_year = datetime.datetime.now().year - 1911
                 
-                # 往回搜尋最近 3 個年份 (當前年份, 前一年, 前兩年)
                 for year in range(current_roc_year, current_roc_year - 3, -1):
-                    print(f"[MOPS 觀測站] 嘗試查詢 {year} 年 (民國) 資料...")
-                    payload = {
-                        "encodeRequestParam": "1",
-                        "step": "1",
-                        "firstin": "1",
-                        "co_id": question,
-                        "year": str(year)
-                    }
-                    
+                    payload = {"encodeRequestParam": "1", "step": "1", "firstin": "1", "co_id": question, "year": str(year)}
                     try:
                         mops_res = httpx.post(mops_url, data=payload, headers=headers, timeout=10.0)
                         if mops_res.status_code == 200:
-                            # 1. 搜尋第一種 PDF 檔案格式 (例如 6523_20240315_E.pdf)
                             pdf_matches = re.findall(r"([a-zA-Z0-9_\-]+\.pdf)", mops_res.text, re.IGNORECASE)
-                            
-                            # 2. 如果沒找到，搜尋 MOPS onclick 函數中的轉址檔案參數
-                            if not pdf_matches:
-                                pdf_matches = re.findall(r"document\.readForm\.filename\.value\s*=\s*['\"]([^'\"]+\.pdf)['\"]", mops_res.text, re.IGNORECASE)
-
                             if pdf_matches:
-                                # 過濾無效檔名並取得第一個合格的 PDF
                                 for pdf_name in pdf_matches:
                                     if len(pdf_name) > 5 and not pdf_name.startswith("http"):
-                                        # 組裝 MOPS 的兩種常見下載路徑
                                         possible_urls = [
                                             f"https://mops.twse.com.tw/nas/STR/{pdf_name}",
                                             f"https://mops.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&co_id={question}&year={year}&mops_filename={pdf_name}"
                                         ]
-                                        
                                         for test_url in possible_urls:
-                                            print(f"[MOPS 觀測站] 嘗試下載 PDF: {test_url}")
                                             mops_pdf_res = httpx.get(test_url, headers=headers, follow_redirects=True, timeout=10.0)
                                             if mops_pdf_res.status_code == 200 and mops_pdf_res.content.startswith(b"%PDF"):
                                                 print(f"[MOPS 觀測站] 成功取得 PDF 檔案！")
                                                 pdf_content = mops_pdf_res.content
                                                 break
-                                    
                                     if pdf_content:
                                         break
-                            
                             if pdf_content:
-                                break  # 成功取得 PDF，結束年份迴圈
-                    except Exception as mops_err:
-                        print(f"[MOPS 觀測站] 查詢 {year} 年發生錯誤: {mops_err}")
+                                break
+                    except Exception:
+                        pass
+
+            # --------------------------------------------------
+            # 階段 4：終極備援——全網搜尋 (搜尋公司官網 / 網路公開的法說會 PDF)
+            # --------------------------------------------------
+            if not pdf_content:
+                print(f"[全網搜尋] 前三階段均未獲得 PDF，開始執行全網關鍵字搜尋 {question} 法人說明會 filetype:pdf ...")
+                try:
+                    from duckduckgo_search import DDGS
+                    query = f"{question} 法人說明會 filetype:pdf"
+                    with DDGS() as ddgs:
+                        results = list(ddgs.text(query, max_results=5))
+                        for r in results:
+                            target_url = r.get("href", "")
+                            if target_url.endswith(".pdf") or "pdf" in target_url.lower():
+                                print(f"[全網搜尋] 嘗試下載搜尋到的 PDF: {target_url}")
+                                search_res = httpx.get(target_url, headers=headers, follow_redirects=True, timeout=10.0)
+                                if search_res.status_code == 200 and search_res.content.startswith(b"%PDF"):
+                                    print(f"[全網搜尋] 成功取得全網 PDF 檔案！")
+                                    pdf_content = search_res.content
+                                    break
+                except Exception as search_err:
+                    print(f"[全網搜尋] 搜尋發生錯誤: {search_err}")
 
             # 3. 檢查最終是否有取得合格的 PDF 內容
             if not pdf_content:
