@@ -81,20 +81,55 @@ def handle_message(event):
         return
        
     # 檢查是否正在與使用者交談
+    # elif working_status:
+    #     try: 
+    #         # 取得使用者輸入的文字
+    #         question = event.message.text
+    #         doc_url = "https://www.twse.com.tw/pdf/ch/"+question+"_ch.pdf"
+    #         doc_data = httpx.get(doc_url)
+    #         if doc_data.status_code != 200:
+    #             completion = '查無股票代號！請輸入台灣上市股票代號！'
+    #         else:
+    #             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
+    #                 temp_file.write(doc_data.content)
+    #                 temp_file_path = temp_file.name
+    #                 sample_doc = client.files.upload(file=temp_file_path)
+    #                 prompt = "請給專業建議!"               
+    #             # gemini-2.5-flash
+    #             completion = client.models.generate_content(
+    #                                 model="gemini-2.5-flash",
+    #                                 contents=[sample_doc, prompt],
+    #                                 config=generation_config).text
+    #         # 取得生成結果
+    #         out = completion
+    #     except:
+    #         # 處理錯誤
+    #         out = "Gemini執行出錯!請換個說法！" 
+          
     elif working_status:
         try: 
             # 取得使用者輸入的文字
-            question = event.message.text
-            doc_url = "https://www.twse.com.tw/pdf/ch/"+question+"_ch.pdf"
-            doc_data = httpx.get(doc_url)
+            question = event.message.text.strip()
+            
+            # 1. 先嘗試上市 (TWSE) 網址
+            doc_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
+            doc_data = httpx.get(doc_url, follow_redirects=True)
+            
+            # 2. 若上市抓不到，嘗試上櫃 (TPEx) 網址
             if doc_data.status_code != 200:
-                completion = '查無股票代號！請輸入台灣上市股票代號！'
+                doc_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{question}_ch.pdf"
+                doc_data = httpx.get(doc_url, follow_redirects=True)
+
+            # 3. 兩者都抓不到才判定為無資料
+            if doc_data.status_code != 200:
+                completion = '查無股票代號或無簡報檔案！請輸入台灣上市或上櫃股票代號！'
             else:
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
                     temp_file.write(doc_data.content)
                     temp_file_path = temp_file.name
                     sample_doc = client.files.upload(file=temp_file_path)
                     prompt = "請給專業建議!"               
+                
                 # gemini-2.5-flash
                 completion = client.models.generate_content(
                                     model="gemini-2.5-flash",
@@ -102,10 +137,10 @@ def handle_message(event):
                                     config=generation_config).text
             # 取得生成結果
             out = completion
-        except:
+        except Exception as e:
             # 處理錯誤
-            out = "Gemini執行出錯!請換個說法！" 
-  
+            out = "Gemini執行出錯!請換個說法！"
+          
         # 回覆生成結果
         line_bot_api.reply_message(
             event.reply_token,
