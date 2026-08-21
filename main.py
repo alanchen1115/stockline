@@ -17,14 +17,14 @@ client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 system_instruction = (
     "你是專業投信分析師，請使用繁體中文（2000字以內），分項說明該公司股市價量表現、"
-    "融資融券、內外資籌碼進出及財務資訊，並分析近期公司股市展望，給予投資人具體的專業建議！"
+    "融資融券、內外資籌碼進出及財務資訊，並分析近期公司股市展望，給予投資人具體的專業建議，例如股價支撐或壓力！如果查不到資訊，就回答查無相關資訊"
 )
 
 thinking_config = genai.types.ThinkingConfig(thinking_budget=0)
 generation_config = genai.types.GenerateContentConfig(
     max_output_tokens=3000,
     temperature=0.1,
-    top_p=0.5,
+    top_p=0.2,
     thinking_config=thinking_config,
     system_instruction=system_instruction
 )
