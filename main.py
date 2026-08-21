@@ -112,14 +112,19 @@ def handle_message(event):
             # 取得使用者輸入的文字
             question = event.message.text
             
+            # 設定 Header 避免被櫃買中心防爬蟲阻擋
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+
             # 1. 先嘗試上市 (TWSE) 網址
             doc_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
-            doc_data = httpx.get(doc_url, follow_redirects=True)
+            doc_data = httpx.get(doc_url, headers=headers, follow_redirects=True, timeout=10.0)
             
             # 2. 若上市抓不到，嘗試上櫃 (TPEx) 網址
             if doc_data.status_code != 200:
                 doc_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{question}_ch.pdf"
-                doc_data = httpx.get(doc_url, follow_redirects=True)
+                doc_data = httpx.get(doc_url, headers=headers, follow_redirects=True, timeout=10.0)
 
             # 3. 兩者都抓不到才判定為無資料
             if doc_data.status_code != 200:
