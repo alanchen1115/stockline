@@ -143,38 +143,62 @@ def handle_message(event):
                         except Exception as json_err:
                             pass
 
-            # --------------------------------------------------
-            # 階段 3：前兩者皆失敗，調用公開資訊觀測站 (MOPS) API
+# --------------------------------------------------
+            # 階段 3：前兩者皆失敗，調用公開資訊觀測站 (MOPS) API (含歷史年度輪詢)
             # --------------------------------------------------
             if not pdf_content:
                 print(f"[MOPS 觀測站] 開始從公開資訊觀測站查詢 {question}...")
+                import datetime, re
+                
                 mops_url = "https://mops.twse.com.tw/mops/web/ajax_t100sb07_1"
-                import datetime
                 current_roc_year = datetime.datetime.now().year - 1911
                 
-                # 向 MOPS 發送 POST 請求
-                payload = {
-                    "encodeRequestParam": "1",
-                    "step": "1",
-                    "firstin": "1",
-                    "co_id": question,
-                    "year": str(current_roc_year)
-                }
-                
-                mops_res = httpx.post(mops_url, data=payload, headers=headers, timeout=10.0)
-                if mops_res.status_code == 200:
-                    import re
-                    # 從 MOPS 回傳 HTML 中解析 PDF 檔名
-                    pdf_matches = re.findall(r"(\d+_\d+_[E|\d]+\.pdf)", mops_res.text, re.IGNORECASE)
-                    if pdf_matches:
-                        latest_pdf = pdf_matches[0]
-                        mops_pdf_url = f"https://mops.twse.com.tw/nas/STR/{latest_pdf}"
-                        print(f"[MOPS 觀測站] 找到最新簡報 PDF 網址: {mops_pdf_url}")
-                        
-                        mops_pdf_res = httpx.get(mops_pdf_url, headers=headers, timeout=10.0)
-                        if mops_pdf_res.status_code == 200 and mops_pdf_res.content.startswith(b"%PDF"):
-                            print(f"[MOPS 觀測站] 成功取得 PDF 檔案！")
-                            pdf_content = mops_pdf_res.content
+                # 往回搜尋最近 3 個年份 (當前年份, 前一年, 前兩年)
+                for year in range(current_roc_year, current_roc_year - 3, -1):
+                    print(f"[MOPS 觀測站] 嘗試查詢 {year} 年 (民國) 資料...")
+                    payload = {
+                        "encodeRequestParam": "1",
+                        "step": "1",
+                        "firstin": "1",
+                        "co_id": question,
+                        "year": str(year)
+                    }
+                    
+                    try:
+                        mops_res = httpx.post(mops_url, data=payload, headers=headers, timeout=10.0)
+                        if mops_res.status_code == 200:
+                            # 1. 搜尋第一種 PDF 檔案格式 (例如 6523_20240315_E.pdf)
+                            pdf_matches = re.findall(r"([a-zA-Z0-9_\-]+\.pdf)", mops_res.text, re.IGNORECASE)
+                            
+                            # 2. 如果沒找到，搜尋 MOPS onclick 函數中的轉址檔案參數
+                            if not pdf_matches:
+                                pdf_matches = re.findall(r"document\.readForm\.filename\.value\s*=\s*['\"]([^'\"]+\.pdf)['\"]", mops_res.text, re.IGNORECASE)
+
+                            if pdf_matches:
+                                # 過濾無效檔名並取得第一個合格的 PDF
+                                for pdf_name in pdf_matches:
+                                    if len(pdf_name) > 5 and not pdf_name.startswith("http"):
+                                        # 組裝 MOPS 的兩種常見下載路徑
+                                        possible_urls = [
+                                            f"https://mops.twse.com.tw/nas/STR/{pdf_name}",
+                                            f"https://mops.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&co_id={question}&year={year}&mops_filename={pdf_name}"
+                                        ]
+                                        
+                                        for test_url in possible_urls:
+                                            print(f"[MOPS 觀測站] 嘗試下載 PDF: {test_url}")
+                                            mops_pdf_res = httpx.get(test_url, headers=headers, follow_redirects=True, timeout=10.0)
+                                            if mops_pdf_res.status_code == 200 and mops_pdf_res.content.startswith(b"%PDF"):
+                                                print(f"[MOPS 觀測站] 成功取得 PDF 檔案！")
+                                                pdf_content = mops_pdf_res.content
+                                                break
+                                    
+                                    if pdf_content:
+                                        break
+                            
+                            if pdf_content:
+                                break  # 成功取得 PDF，結束年份迴圈
+                    except Exception as mops_err:
+                        print(f"[MOPS 觀測站] 查詢 {year} 年發生錯誤: {mops_err}")
 
             # 3. 檢查最終是否有取得合格的 PDF 內容
             if not pdf_content:
