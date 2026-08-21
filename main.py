@@ -82,7 +82,7 @@ def handle_message(event):
     # 檢查是否正在與使用者交談
     elif working_status:
         try: 
-            question = event.message.text.strip()
+            question = event.message.text
             print(f"\n--- [開始處理查詢] 股票代碼: {question} ---")
 # 建立完整模擬真實瀏覽器的 Header
             headers = {
