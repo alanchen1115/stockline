@@ -221,7 +221,7 @@ def handle_message(event):
                     )
 
                 completion = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.5-flash",
                     contents=[prompt],
                     config=generation_config
                 ).text
