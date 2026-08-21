@@ -148,34 +148,7 @@ def handle_message(event):
                         pass
 
             # --------------------------------------------------
-            # 階段 3：嘗試全網 PDF 搜尋
-            # --------------------------------------------------
-            if not pdf_content:
-                print(f"[階段 3 - 全網搜尋] 開始全網搜尋 {question} 法人說明會 PDF...")
-                try:
-                    search_query = f"{question} 法人說明會 filetype:pdf"
-                    search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(search_query)}"
-                    
-                    search_res = httpx.get(search_url, headers=headers, timeout=8.0)
-                    if search_res.status_code == 200:
-                        raw_urls = re.findall(r'uddg=([^&"\']+)', search_res.text)
-                        pdf_urls = [urllib.parse.unquote(u) for u in raw_urls if ".pdf" in u.lower()]
-                        
-                        for pdf_target in pdf_urls[:3]:
-                            print(f"[階段 3 - 全網搜尋] 嘗試下載: {pdf_target}")
-                            try:
-                                download_res = httpx.get(pdf_target, headers=headers, follow_redirects=True, timeout=8.0)
-                                if download_res.status_code == 200 and download_res.content.startswith(b"%PDF"):
-                                    print(f"[階段 3 - 全網搜尋] 成功取得全網 PDF！")
-                                    pdf_content = download_res.content
-                                    break
-                            except Exception:
-                                pass
-                except Exception as search_err:
-                    print(f"[階段 3 - 全網搜尋] 搜尋跳過: {search_err}")
-
-            # --------------------------------------------------
-            # 階段 4：Gemini 智慧生成 (PDF 增強 vs DuckDuckGo 實時搜尋)
+            # 階段 4：Gemini 智慧生成 (PDF 增強 vs yfinance 實時行情 + DuckDuckGo 近期新聞)
             # --------------------------------------------------
             if pdf_content:
                 print(f"[Gemini 分析] 模式: 【PDF 簡報增強分析】")
@@ -187,41 +160,84 @@ def handle_message(event):
                 prompt = f"這是一份台股『{question}』的法人說明會簡報，請協助依據系統指令做專業建議！"
                 
                 completion = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model="gemini-2.5-flash",
                     contents=[sample_doc, prompt],
                     config=generation_config
                 ).text
             else:
-                print(f"[Gemini 分析] 模式: 【DuckDuckGo 搜尋最新個股資訊】 (查無官方 PDF)")
+                print(f"[Gemini 分析] 模式: 【yfinance 實時數據 + DuckDuckGo 近期新聞】 (查無官方 PDF)")
                 
-                search_context = ""
+                # 1. 使用 yfinance 抓取即時價量與基本面 (優先測試上櫃 .TWO，再測試上市 .TW)
+                yf_summary = "【yfinance】未抓取到即時行情數據"
+                try:
+                    import yfinance as yf
+                    clean_id = question.strip().upper()
+                    
+                    for suffix in [".TWO", ".TW"]:
+                        symbol = f"{clean_id}{suffix}"
+                        ticker = yf.Ticker(symbol)
+                        hist = ticker.history(period="5d")
+                        
+                        if not hist.empty:
+                            info = ticker.info
+                            latest_price = hist['Close'].iloc[-1]
+                            prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else latest_price
+                            change = latest_price - prev_close
+                            pct_change = (change / prev_close) * 100
+                            volume = hist['Volume'].iloc[-1]
+                            
+                            market_type_str = "上櫃" if suffix == ".TWO" else "上市"
+                            yf_summary = (
+                                f"【yfinance 實時交易數據 ({question} {market_type_str})】\n"
+                                f"• 最新收盤價: {latest_price:.2f} 元 (漲跌: {change:+.2f}, {pct_change:+.2f}%)\n"
+                                f"• 最新成交量: {int(volume):,} 股\n"
+                                f"• 本益比 (P/E): {info.get('trailingPE', 'N/A')}\n"
+                                f"• 股價淨值比 (P/B): {info.get('priceToBook', 'N/A')}\n"
+                                f"• 52 週高/低: {info.get('fiftyTwoWeekHigh', 'N/A')} / {info.get('fiftyTwoWeekLow', 'N/A')}"
+                            )
+                            print(f"[yfinance] 成功抓取 {symbol} 即時行情！")
+                            break
+                except Exception as yf_err:
+                    print(f"[yfinance] 抓取失敗: {yf_err}")
+
+                # 2. 使用 DuckDuckGo 抓取近一個月 (timelimit='m') 的籌碼與營收新聞
+                news_context = ""
                 try:
                     from duckduckgo_search import DDGS
-                    query = f"{question} 股票 最新股價 營收 三大法人 新聞 資料日期"
-                    print(f"[DuckDuckGo] 開始搜尋: {query}")
+                    import datetime
                     
-                    results = list(DDGS().text(query, max_results=5))
-                    if results:
-                        items = [f"【新聞標題】{r.get('title')}\n【摘要內容】{r.get('body')}" for r in results]
-                        search_context = "\n\n".join(items)
-                        print(f"[DuckDuckGo] 成功擷取 {len(results)} 筆最新網路資訊！")
-                except Exception as ddg_err:
-                    print(f"[DuckDuckGo] 搜尋過程發生錯誤: {ddg_err}")
+                    current_year = datetime.datetime.now().year
+                    query = f"{question} 股票 {current_year} 營收 三大法人 近況"
+                    print(f"[DuckDuckGo] 搜尋近一個月最新新聞: {query}")
+                    
+                    # 強制只抓近一個月內 (timelimit='m') 的最新報導
+                    results = list(DDGS().text(query, max_results=5, timelimit='m'))
+                    if not results:
+                        results = list(DDGS().text(query, max_results=5, timelimit='y'))
 
-                if search_context:
-                    prompt = (
-                        f"以下是從網路搜尋到的台灣股票『{question}』最新即時新聞與數據：\n\n"
-                        f"{search_context}\n\n"
-                        f"請結合上述最新資料，嚴格依照系統指令（分項說明價量表現、籌碼面、財務資訊、未來展望與投資建議）產出專業分析報告！"
-                    )
-                else:
-                    prompt = (
-                        f"請針對台灣股票代號/公司名稱『{question}』，"
-                        f"依據系統指令（價量表現、籌碼面、財務資訊、未來展望與投資建議）進行專業分析報告！"
-                    )
+                    if results:
+                        items = [f"【新聞標題】{r.get('title')}\n【內容摘要】{r.get('body')}" for r in results]
+                        news_context = "\n\n".join(items)
+                        print(f"[DuckDuckGo] 成功擷取 {len(results)} 筆最新新聞！")
+                except Exception as ddg_err:
+                    print(f"[DuckDuckGo] 搜尋失敗: {ddg_err}")
+
+                # 3. 組合精確數據並送交 Gemini
+                combined_context = (
+                    f"{yf_summary}\n\n"
+                    f"【最新即時新聞與籌碼動態】\n"
+                    f"{news_context if news_context else '無最新新聞摘要'}"
+                )
+                
+                prompt = (
+                    f"以下是從 yfinance 及網路即時擷取的台灣股票『{question}』最新數據與新聞：\n\n"
+                    f"{combined_context}\n\n"
+                    f"請務必結合上方【yfinance 實時交易數據】的精確數字與最新新聞，嚴格依照系統指令"
+                    f"（分項說明價量表現、籌碼面、財務資訊、未來展望與投資建議）產出專業分析報告！"
+                )
 
                 completion = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model="gemini-2.5-flash",
                     contents=[prompt],
                     config=generation_config
                 ).text
