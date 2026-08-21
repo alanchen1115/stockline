@@ -81,6 +81,7 @@ def handle_message(event):
         return
        
     # 檢查是否正在與使用者交談
+  
     # elif working_status:
     #     try: 
     #         # 取得使用者輸入的文字
@@ -109,7 +110,7 @@ def handle_message(event):
     elif working_status:
         try: 
             # 取得使用者輸入的文字
-            question = event.message.text.strip()
+            question = event.message.text
             
             # 1. 先嘗試上市 (TWSE) 網址
             doc_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
