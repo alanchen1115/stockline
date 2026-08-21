@@ -175,7 +175,7 @@ def handle_message(event):
                     print(f"[階段 3 - 全網搜尋] 搜尋跳過: {search_err}")
 
             # --------------------------------------------------
-            # 階段 4：Gemini 智慧生成 (雙軌切換)
+            # 階段 4：Gemini 智慧生成 (PDF 增強 vs DuckDuckGo 實時搜尋)
             # --------------------------------------------------
             if pdf_content:
                 print(f"[Gemini 分析] 模式: 【PDF 簡報增強分析】")
@@ -185,23 +185,48 @@ def handle_message(event):
                     sample_doc = client.files.upload(file=temp_file_path)
                     
                 prompt = f"這是一份台股『{question}』的法人說明會簡報，請協助依據系統指令做專業建議！"
-                contents = [sample_doc, prompt]
+                
+                completion = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[sample_doc, prompt],
+                    config=generation_config
+                ).text
             else:
-                print(f"[Gemini 分析] 模式: 【純文字知識庫 / 數據分析】 (查無官方 PDF)")
-                prompt = (
-                    f"請針對台灣股票代號/公司名稱『{question}』進行詳細分析。"
-                    f"請上網查詢專業投資知識庫與台股資訊，產出包含價量表現、籌碼面、財務狀況及未來展望的完整分析報告！"
-                )
-                contents = [prompt]
+                print(f"[Gemini 分析] 模式: 【DuckDuckGo 搜尋最新個股資訊】 (查無官方 PDF)")
+                
+                search_context = ""
+                try:
+                    from duckduckgo_search import DDGS
+                    query = f"{question} 股票 最新股價 營收 三大法人 新聞"
+                    print(f"[DuckDuckGo] 開始搜尋: {query}")
+                    
+                    results = list(DDGS().text(query, max_results=5))
+                    if results:
+                        items = [f"【新聞標題】{r.get('title')}\n【摘要內容】{r.get('body')}" for r in results]
+                        search_context = "\n\n".join(items)
+                        print(f"[DuckDuckGo] 成功擷取 {len(results)} 筆最新網路資訊！")
+                except Exception as ddg_err:
+                    print(f"[DuckDuckGo] 搜尋過程發生錯誤: {ddg_err}")
 
-            print("[Gemini] 正傳送給 Gemini 生成報告中...")
-            completion = client.models.generate_content(
-                model="gemini-3.5-flash",
-                contents=contents,
-                config=generation_config
-            ).text
+                if search_context:
+                    prompt = (
+                        f"以下是從網路搜尋到的台灣股票『{question}』最新即時新聞與數據：\n\n"
+                        f"{search_context}\n\n"
+                        f"請結合上述最新資料，嚴格依照系統指令（分項說明價量表現、籌碼面、財務資訊、未來展望與投資建議）產出專業分析報告！"
+                    )
+                else:
+                    prompt = (
+                        f"請針對台灣股票代號/公司名稱『{question}』，"
+                        f"依據系統指令（價量表現、籌碼面、財務資訊、未來展望與投資建議）進行專業分析報告！"
+                    )
+
+                completion = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[prompt],
+                    config=generation_config
+                ).text
+
             print("[Gemini] 分析報告生成完成！")
-            
             out = completion
 
         except Exception as e:
