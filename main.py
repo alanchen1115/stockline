@@ -5,6 +5,8 @@ import re
 import datetime
 import httpx
 import uvicorn
+from duckduckgo_search import DDGS    
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request, Header, BackgroundTasks, HTTPException
 from google import genai
@@ -202,10 +204,7 @@ def handle_message(event):
 
                 # 2. 使用 DuckDuckGo 抓取近一個月 (timelimit='m') 的籌碼與營收新聞
                 news_context = ""
-                try:
-                    from duckduckgo_search import DDGS
-                    import datetime
-                    
+                try:                    
                     current_year = datetime.datetime.now().year
                     query = f"{question} 股票 {current_year} 營收 三大法人 近況"
                     print(f"[DuckDuckGo] 搜尋近一個月最新新聞: {query}")
