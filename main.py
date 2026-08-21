@@ -104,52 +104,54 @@ def handle_message(event):
 
             # 2. 若上市沒抓到真正的 PDF，嘗試上櫃 (TPEx)
             if not pdf_content:
-                print(f"[上櫃 TPEx] 開始透過 API 查詢 {question} 的簡報網址...")
-                api_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/regular_api.php?stk_code={question}"
-                api_res = httpx.get(api_url, headers=headers, timeout=10.0)
+                print(f"[上櫃 TPEx] 開始查詢 {question} 的簡報網址...")
+                import datetime
+                import re
+                import urllib.parse
                 
-                if api_res.status_code == 200:
-                    try:
-                        api_json = api_res.json()
-                        if "aaData" in api_json and len(api_json["aaData"]) > 0:
-                            import re
-                            import urllib.parse
-                            
-                            tpex_pdf_url = None
-                            
-                            # 遍歷所有紀錄，尋找最新的 PDF 連結
-                            for row in api_json["aaData"]:
-                                row_str = str(row)
-                                # 嘗試比對包含 .pdf 的連結或檔名
-                                pdf_match = re.search(r'(doc/[^\'"]+\.pdf|[^\'"]+\.pdf)', row_str, re.IGNORECASE)
-                                if pdf_match:
-                                    raw_path = pdf_match.group(1)
-                                    # 解碼 URL (處理 %20 或中文路徑)
-                                    raw_path = urllib.parse.unquote(raw_path)
-                                    
-                                    # 補全完整 URL
-                                    if raw_path.startswith("http"):
-                                        tpex_pdf_url = raw_path
-                                    elif raw_path.startswith("doc/"):
-                                        tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/{raw_path}"
-                                    else:
-                                        tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{raw_path}"
-                                    break # 找到最新的一筆就跳出循環
-                            
-                            if tpex_pdf_url:
-                                print(f"[上櫃 TPEx] 找到上櫃 PDF 網址: {tpex_pdf_url}")
-                                tpex_res = httpx.get(tpex_pdf_url, headers=headers, follow_redirects=True, timeout=10.0)
-                                if tpex_res.status_code == 200 and tpex_res.content.startswith(b"%PDF"):
-                                    print(f"[上櫃 TPEx] 成功取得 PDF 檔案！")
-                                    pdf_content = tpex_res.content
-                                else:
-                                    print(f"[上櫃 TPEx] 下載失敗或檔案非 PDF 格式 (Status: {tpex_res.status_code})")
-                            else:
-                                print("[上櫃 TPEx] 找到法說會紀錄，但無 PDF 連結")
-                        else:
-                            print("[上櫃 TPEx] 該公司未在上櫃系統找到法說會簡報紀錄")
-                    except Exception as json_err:
-                        print(f"[上櫃 TPEx] 解析 API JSON 失敗: {json_err}")
+                # 取得當前民國年份 (例如 2026年 -> 民國 115 年)
+                current_roc_year = datetime.datetime.now().year - 1911
+                
+                # 往回搜尋最近 4 個年份 (例如 115, 114, 113, 112)
+                for year in range(current_roc_year, current_roc_year - 4, -1):
+                    api_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/regular_api.php?stk_code={question}&Syear={year}"
+                    print(f"[上櫃 TPEx] 嘗試查詢 {year} 年 (民國) API...")
+                    
+                    api_res = httpx.get(api_url, headers=headers, timeout=10.0)
+                    if api_res.status_code == 200:
+                        try:
+                            api_json = api_res.json()
+                            if "aaData" in api_json and len(api_json["aaData"]) > 0:
+                                tpex_pdf_url = None
+                                
+                                # 遍歷該年度的所有紀錄
+                                for row in api_json["aaData"]:
+                                    row_str = str(row)
+                                    pdf_match = re.search(r'(doc/[^\'"]+\.pdf|[^\'"]+\.pdf)', row_str, re.IGNORECASE)
+                                    if pdf_match:
+                                        raw_path = pdf_match.group(1)
+                                        raw_path = urllib.parse.unquote(raw_path)
+                                        
+                                        if raw_path.startswith("http"):
+                                            tpex_pdf_url = raw_path
+                                        elif raw_path.startswith("doc/"):
+                                            tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/{raw_path}"
+                                        else:
+                                            tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{raw_path}"
+                                        break
+                                
+                                if tpex_pdf_url:
+                                    print(f"[上櫃 TPEx] 在 {year} 年找到 PDF 網址: {tpex_pdf_url}")
+                                    tpex_res = httpx.get(tpex_pdf_url, headers=headers, follow_redirects=True, timeout=10.0)
+                                    if tpex_res.status_code == 200 and tpex_res.content.startswith(b"%PDF"):
+                                        print(f"[上櫃 TPEx] 成功取得 PDF 檔案！")
+                                        pdf_content = tpex_res.content
+                                        break  # 成功抓到 PDF，跳出年份迴圈
+                        except Exception as json_err:
+                            print(f"[上櫃 TPEx] 解析 API 失敗: {json_err}")
+                
+                if not pdf_content:
+                    print("[上櫃 TPEx] 過去 4 年內均未查到可用的法說會簡報 PDF")
 
             # 3. 檢查最終是否有取得合格的 PDF 內容
             if not pdf_content:
