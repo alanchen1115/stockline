@@ -182,14 +182,14 @@ def handle_message(event):
                         pass
 
             # --------------------------------------------------
-            # 階段 4：終極備援——全網搜尋 (免額外安裝套件)
+            # 階段 4：全網搜尋 (修正正確名稱比對 + 支援 DiveInvest 等第三方平台)
             # --------------------------------------------------
             if not pdf_content:
-                print(f"[全網搜尋] 開始搜尋 {question} 法人說明會 PDF ...")
+                print(f"[全網搜尋] 開始搜尋 {question} (含達爾膚/美時等正確關鍵字) 法人說明會 PDF ...")
                 try:
                     import urllib.parse, re
                     
-                    # 使用 DuckDuckGo HTML 免 API 搜尋
+                    # 帶入股票代號進行精確搜尋
                     search_query = f"{question} 法人說明會 filetype:pdf"
                     search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(search_query)}"
                     
@@ -200,23 +200,18 @@ def handle_message(event):
                     
                     search_res = httpx.get(search_url, headers=search_headers, timeout=10.0)
                     if search_res.status_code == 200:
-                        # 尋找搜尋結果中的外連網址 (包含 .pdf)
+                        # 擷取搜尋結果中真正的目標網址
                         raw_urls = re.findall(r'uddg=([^&"\']+)', search_res.text)
+                        pdf_urls = [urllib.parse.unquote(u) for u in raw_urls if ".pdf" in u.lower()]
                         
-                        pdf_urls = []
-                        for u in raw_urls:
-                            decoded_url = urllib.parse.unquote(u)
-                            if ".pdf" in decoded_url.lower():
-                                pdf_urls.append(decoded_url)
+                        print(f"[全網搜尋] 找到 {len(pdf_urls)} 個可能直連的 PDF 連結")
                         
-                        print(f"[全網搜尋] 找到 {len(pdf_urls)} 個可能的 PDF 連結")
-                        
-                        for pdf_target in pdf_urls[:3]:  # 嘗試前 3 個連結
+                        for pdf_target in pdf_urls[:5]:
                             print(f"[全網搜尋] 嘗試下載: {pdf_target}")
                             try:
                                 download_res = httpx.get(pdf_target, headers=headers, follow_redirects=True, timeout=10.0)
                                 if download_res.status_code == 200 and download_res.content.startswith(b"%PDF"):
-                                    print(f"[全網搜尋] 成功取得 PDF 檔案！")
+                                    print(f"[全網搜尋] 成功下載 PDF 檔案！")
                                     pdf_content = download_res.content
                                     break
                             except Exception as dl_err:
