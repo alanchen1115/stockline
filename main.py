@@ -182,26 +182,47 @@ def handle_message(event):
                         pass
 
             # --------------------------------------------------
-            # 階段 4：終極備援——全網搜尋 (搜尋公司官網 / 網路公開的法說會 PDF)
+            # 階段 4：終極備援——全網搜尋 (免額外安裝套件)
             # --------------------------------------------------
             if not pdf_content:
-                print(f"[全網搜尋] 前三階段均未獲得 PDF，開始執行全網關鍵字搜尋 {question} 法人說明會 filetype:pdf ...")
+                print(f"[全網搜尋] 開始搜尋 {question} 法人說明會 PDF ...")
                 try:
-                    from duckduckgo_search import DDGS
-                    query = f"{question} 法人說明會 filetype:pdf"
-                    with DDGS() as ddgs:
-                        results = list(ddgs.text(query, max_results=5))
-                        for r in results:
-                            target_url = r.get("href", "")
-                            if target_url.endswith(".pdf") or "pdf" in target_url.lower():
-                                print(f"[全網搜尋] 嘗試下載搜尋到的 PDF: {target_url}")
-                                search_res = httpx.get(target_url, headers=headers, follow_redirects=True, timeout=10.0)
-                                if search_res.status_code == 200 and search_res.content.startswith(b"%PDF"):
-                                    print(f"[全網搜尋] 成功取得全網 PDF 檔案！")
-                                    pdf_content = search_res.content
+                    import urllib.parse, re
+                    
+                    # 使用 DuckDuckGo HTML 免 API 搜尋
+                    search_query = f"{question} 法人說明會 filetype:pdf"
+                    search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(search_query)}"
+                    
+                    search_headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"
+                    }
+                    
+                    search_res = httpx.get(search_url, headers=search_headers, timeout=10.0)
+                    if search_res.status_code == 200:
+                        # 尋找搜尋結果中的外連網址 (包含 .pdf)
+                        raw_urls = re.findall(r'uddg=([^&"\']+)', search_res.text)
+                        
+                        pdf_urls = []
+                        for u in raw_urls:
+                            decoded_url = urllib.parse.unquote(u)
+                            if ".pdf" in decoded_url.lower():
+                                pdf_urls.append(decoded_url)
+                        
+                        print(f"[全網搜尋] 找到 {len(pdf_urls)} 個可能的 PDF 連結")
+                        
+                        for pdf_target in pdf_urls[:3]:  # 嘗試前 3 個連結
+                            print(f"[全網搜尋] 嘗試下載: {pdf_target}")
+                            try:
+                                download_res = httpx.get(pdf_target, headers=headers, follow_redirects=True, timeout=10.0)
+                                if download_res.status_code == 200 and download_res.content.startswith(b"%PDF"):
+                                    print(f"[全網搜尋] 成功取得 PDF 檔案！")
+                                    pdf_content = download_res.content
                                     break
+                            except Exception as dl_err:
+                                print(f"[全網搜尋] 下載失敗: {dl_err}")
                 except Exception as search_err:
-                    print(f"[全網搜尋] 搜尋發生錯誤: {search_err}")
+                    print(f"[全網搜尋] 搜尋過程發生錯誤: {search_err}")
 
             # 3. 檢查最終是否有取得合格的 PDF 內容
             if not pdf_content:
