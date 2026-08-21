@@ -20,7 +20,7 @@ system_instruction = (
     "融資融券、內外資籌碼進出及財務資訊，並分析近期公司股市展望，給予投資人具體的專業建議，例如股價支撐或壓力！如果查不到資訊，就回答查無相關資訊"
 )
 
-thinking_config = genai.types.ThinkingConfig(thinking_budget=0)
+thinking_config = genai.types.ThinkingConfig(thinking_budget=minimum)
 generation_config = genai.types.GenerateContentConfig(
     max_output_tokens=4000,
     temperature=0.1,
@@ -196,7 +196,7 @@ def handle_message(event):
 
             print("[Gemini] 正傳送給 Gemini 生成報告中...")
             completion = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.5-flash",
                 contents=contents,
                 config=generation_config
             ).text
