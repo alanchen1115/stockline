@@ -160,7 +160,7 @@ def handle_message(event):
                 prompt = f"這是一份台股『{question}』的法人說明會簡報，請協助依據系統指令做專業建議！"
                 
                 completion = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.5-flash",
                     contents=[sample_doc, prompt],
                     config=generation_config
                 ).text
@@ -237,7 +237,7 @@ def handle_message(event):
                 )
 
                 completion = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.5-flash",
                     contents=[prompt],
                     config=generation_config
                 ).text
