@@ -85,10 +85,15 @@ def handle_message(event):
             question = event.message.text.strip()
             print(f"\n--- [開始處理查詢] 股票代碼: {question} ---")
             
+# 建立完整模擬真實瀏覽器的 Header
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Referer": "https://www.tpex.org.tw/",
+                "Connection": "keep-alive"
             }
-            
+
             # 1. 嘗試上市 (TWSE)
             twse_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
             print(f"[上市 TWSE] 嘗試下載: {twse_url}")
@@ -97,10 +102,18 @@ def handle_message(event):
             
             # 2. 若上市抓不到，嘗試上櫃 (TPEx)
             if doc_data.status_code != 200:
+                # 方案 A: 嘗試預設上櫃簡報路徑
                 tpex_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{question}_ch.pdf"
                 print(f"[上櫃 TPEx] 嘗試下載: {tpex_url}")
                 doc_data = httpx.get(tpex_url, headers=headers, follow_redirects=True, timeout=10.0)
                 print(f"[上櫃 TPEx] 回傳狀態碼: {doc_data.status_code}")
+
+                # 方案 B: 若方案 A 回傳 400/404，嘗試上櫃備用下載路徑
+                if doc_data.status_code != 200:
+                    tpex_alt_url = f"https://www.tpex.org.tw/web/stock/aftertrading/corp_brief/brief_download.php?stk_code={question}"
+                    print(f"[上櫃 TPEx 備用] 嘗試下載: {tpex_alt_url}")
+                    doc_data = httpx.get(tpex_alt_url, headers=headers, follow_redirects=True, timeout=10.0)
+                    print(f"[上櫃 TPEx 備用] 回傳狀態碼: {doc_data.status_code}")
 
             # 3. 檢查最終抓取結果
             if doc_data.status_code != 200:
