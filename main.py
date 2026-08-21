@@ -6,6 +6,7 @@ import datetime
 import httpx
 import uvicorn
 from duckduckgo_search import DDGS    
+import yfinance as yf
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request, Header, BackgroundTasks, HTTPException
@@ -172,7 +173,6 @@ def handle_message(event):
                 # 1. 使用 yfinance 抓取即時價量與基本面 (優先測試上櫃 .TWO，再測試上市 .TW)
                 yf_summary = "【yfinance】未抓取到即時行情數據"
                 try:
-                    import yfinance as yf
                     clean_id = question.strip().upper()
                     
                     for suffix in [".TWO", ".TW"]:
