@@ -16,13 +16,13 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 system_instruction = (
-    "你是專業投信分析師，請使用繁體中文（2000字以內），分項說明該公司股市價量表現、"
+    "你是專業投信分析師，請使用繁體中文（1500字以內），分項說明該公司股市價量表現、"
     "融資融券、內外資籌碼進出及財務資訊，並分析近期公司股市展望，給予投資人具體的專業建議，例如股價支撐或壓力！如果查不到資訊，就回答查無相關資訊"
 )
 
 thinking_config = genai.types.ThinkingConfig(thinking_budget=0)
 generation_config = genai.types.GenerateContentConfig(
-    max_output_tokens=3000,
+    max_output_tokens=4000,
     temperature=0.1,
     top_p=0.2,
     thinking_config=thinking_config,
@@ -190,7 +190,7 @@ def handle_message(event):
                 print(f"[Gemini 分析] 模式: 【純文字知識庫 / 數據分析】 (查無官方 PDF)")
                 prompt = (
                     f"請針對台灣股票代號/公司名稱『{question}』進行詳細分析。"
-                    f"請依據你的專業投資知識庫與台股資訊，產出包含價量表現、籌碼面、財務狀況及未來展望的完整分析報告！"
+                    f"請上網查詢專業投資知識庫與台股資訊，產出包含價量表現、籌碼面、財務狀況及未來展望的完整分析報告！"
                 )
                 contents = [prompt]
 
