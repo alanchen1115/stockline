@@ -7,5 +7,3 @@ python-dotenv
 line-bot-sdk
 google-genai
 httpx
-duckduckgo-search
-yfinance
