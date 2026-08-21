@@ -112,21 +112,38 @@ def handle_message(event):
                     try:
                         api_json = api_res.json()
                         if "aaData" in api_json and len(api_json["aaData"]) > 0:
-                            pdf_file_info = api_json["aaData"][0]
                             import re
-                            pdf_match = re.search(r'doc/([^\'"]+\.pdf)', str(pdf_file_info))
+                            import urllib.parse
                             
-                            if pdf_match:
-                                pdf_filename = pdf_match.group(1)
-                                tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{pdf_filename}"
+                            tpex_pdf_url = None
+                            
+                            # 遍歷所有紀錄，尋找最新的 PDF 連結
+                            for row in api_json["aaData"]:
+                                row_str = str(row)
+                                # 嘗試比對包含 .pdf 的連結或檔名
+                                pdf_match = re.search(r'(doc/[^\'"]+\.pdf|[^\'"]+\.pdf)', row_str, re.IGNORECASE)
+                                if pdf_match:
+                                    raw_path = pdf_match.group(1)
+                                    # 解碼 URL (處理 %20 或中文路徑)
+                                    raw_path = urllib.parse.unquote(raw_path)
+                                    
+                                    # 補全完整 URL
+                                    if raw_path.startswith("http"):
+                                        tpex_pdf_url = raw_path
+                                    elif raw_path.startswith("doc/"):
+                                        tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/{raw_path}"
+                                    else:
+                                        tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{raw_path}"
+                                    break # 找到最新的一筆就跳出循環
+                            
+                            if tpex_pdf_url:
                                 print(f"[上櫃 TPEx] 找到上櫃 PDF 網址: {tpex_pdf_url}")
-                                
                                 tpex_res = httpx.get(tpex_pdf_url, headers=headers, follow_redirects=True, timeout=10.0)
                                 if tpex_res.status_code == 200 and tpex_res.content.startswith(b"%PDF"):
                                     print(f"[上櫃 TPEx] 成功取得 PDF 檔案！")
                                     pdf_content = tpex_res.content
                                 else:
-                                    print(f"[上櫃 TPEx] 下載失敗或檔案非 PDF 格式")
+                                    print(f"[上櫃 TPEx] 下載失敗或檔案非 PDF 格式 (Status: {tpex_res.status_code})")
                             else:
                                 print("[上櫃 TPEx] 找到法說會紀錄，但無 PDF 連結")
                         else:
