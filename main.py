@@ -65,15 +65,14 @@ def handle_message(event):
     
     # 檢查事件類型和訊息類型
     if event.type != "message" or event.message.type != "text":
-        # 回覆錯誤訊息
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="Event type error:[No message or the message does not contain text]")
         )
+        return
         
     # 檢查使用者是否輸入 "再見"
     elif event.message.text == "再見":
-        # 回覆 "Bye!"
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="Bye!")
@@ -81,76 +80,61 @@ def handle_message(event):
         return
        
     # 檢查是否正在與使用者交談
-  
-    # elif working_status:
-    #     try: 
-    #         # 取得使用者輸入的文字
-    #         question = event.message.text
-    #         doc_url = "https://www.twse.com.tw/pdf/ch/"+question+"_ch.pdf"
-    #         doc_data = httpx.get(doc_url)
-    #         if doc_data.status_code != 200:
-    #             completion = '查無股票代號！請輸入台灣上市股票代號！'
-    #         else:
-    #             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
-    #                 temp_file.write(doc_data.content)
-    #                 temp_file_path = temp_file.name
-    #                 sample_doc = client.files.upload(file=temp_file_path)
-    #                 prompt = "請給專業建議!"               
-    #             # gemini-2.5-flash
-    #             completion = client.models.generate_content(
-    #                                 model="gemini-2.5-flash",
-    #                                 contents=[sample_doc, prompt],
-    #                                 config=generation_config).text
-    #         # 取得生成結果
-    #         out = completion
-    #     except:
-    #         # 處理錯誤
-    #         out = "Gemini執行出錯!請換個說法！" 
-          
     elif working_status:
         try: 
-            # 取得使用者輸入的文字
-            question = event.message.text
+            question = event.message.text.strip()
+            print(f"\n--- [開始處理查詢] 股票代碼: {question} ---")
             
-            # 設定 Header 避免被櫃買中心防爬蟲阻擋
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-
-            # 1. 先嘗試上市 (TWSE) 網址
-            doc_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
-            doc_data = httpx.get(doc_url, headers=headers, follow_redirects=True, timeout=10.0)
             
-            # 2. 若上市抓不到，嘗試上櫃 (TPEx) 網址
+            # 1. 嘗試上市 (TWSE)
+            twse_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
+            print(f"[上市 TWSE] 嘗試下載: {twse_url}")
+            doc_data = httpx.get(twse_url, headers=headers, follow_redirects=True, timeout=10.0)
+            print(f"[上市 TWSE] 回傳狀態碼: {doc_data.status_code}")
+            
+            # 2. 若上市抓不到，嘗試上櫃 (TPEx)
             if doc_data.status_code != 200:
-                doc_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{question}_ch.pdf"
-                doc_data = httpx.get(doc_url, headers=headers, follow_redirects=True, timeout=10.0)
+                tpex_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{question}_ch.pdf"
+                print(f"[上櫃 TPEx] 嘗試下載: {tpex_url}")
+                doc_data = httpx.get(tpex_url, headers=headers, follow_redirects=True, timeout=10.0)
+                print(f"[上櫃 TPEx] 回傳狀態碼: {doc_data.status_code}")
 
-            # 3. 兩者都抓不到才判定為無資料
+            # 3. 檢查最終抓取結果
             if doc_data.status_code != 200:
-                completion = '查無股票代號或無簡報檔案！請輸入台灣上市或上櫃股票代號！'
+                print(f"[結果] 上市與上櫃均抓取失敗 (最後 Status Code: {doc_data.status_code})")
+                completion = '查無股票代號或該公司未上傳法說會簡報 PDF！請確認代碼後再試！'
             else:
+                print(f"[結果] 成功取得 PDF，檔案大小: {len(doc_data.content)} bytes")
+                
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
                     temp_file.write(doc_data.content)
                     temp_file_path = temp_file.name
+                    
+                    print("[Gemini] 開始上傳 PDF 至 Google API...")
                     sample_doc = client.files.upload(file=temp_file_path)
                     prompt = "請給專業建議!"               
-                
-                # gemini-2.5-flash
-                completion = client.models.generate_content(
-                                    model="gemini-2.5-flash",
-                                    contents=[sample_doc, prompt],
-                                    config=generation_config).text
-            # 取得生成結果
+                    
+                    print("[Gemini] 開始生成分析報告...")
+                    completion = client.models.generate_content(
+                                        model="gemini-2.5-flash",
+                                        contents=[sample_doc, prompt],
+                                        config=generation_config).text
+                    print("[Gemini] 報告生成完成！")
+                    
             out = completion
+            
         except Exception as e:
-            # 處理錯誤
-            out = "Gemini執行出錯!請換個說法！"
-          
+            print(f"[錯誤] 程式執行發生例外狀況: {str(e)}")
+            out = f"Gemini執行出錯! 錯誤訊息: {str(e)}" 
+  
         # 回覆生成結果
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=out))
+        return
 
 if __name__ == "__main__":
     # 啟動 FastAPI 應用程式
