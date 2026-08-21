@@ -87,51 +87,44 @@ def handle_message(event):
             # 建立完整模擬真實瀏覽器的 Header
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.tpex.org.tw/"
+                "Referer": "https://mops.twse.com.tw/"
             }
+
             pdf_content = None
-            # 1. 嘗試上市 (TWSE)
+
+            # --------------------------------------------------
+            # 階段 1：嘗試上市 (TWSE) 快速下載
+            # --------------------------------------------------
             twse_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
             print(f"[上市 TWSE] 嘗試下載: {twse_url}")
             res = httpx.get(twse_url, headers=headers, follow_redirects=True, timeout=10.0)
-            
-            # 驗證：狀態碼必須為 200，且內容必須是真正的 PDF (檔案開頭為 %PDF)
             if res.status_code == 200 and res.content.startswith(b"%PDF"):
                 print(f"[上市 TWSE] 成功取得 PDF 檔案！")
                 pdf_content = res.content
             else:
-                print(f"[上市 TWSE] 查無 PDF (回傳非 PDF 檔或 HTML 轉址頁面)")
+                print(f"[上市 TWSE] 查無 PDF (非 PDF 格式)")
 
-            # 2. 若上市沒抓到真正的 PDF，嘗試上櫃 (TPEx)
+            # --------------------------------------------------
+            # 階段 2：嘗試上櫃 (TPEx) 歷史年度 API
+            # --------------------------------------------------
             if not pdf_content:
                 print(f"[上櫃 TPEx] 開始查詢 {question} 的簡報網址...")
-                import datetime
-                import re
-                import urllib.parse
-                
-                # 取得當前民國年份 (例如 2026年 -> 民國 115 年)
+                import datetime, re, urllib.parse
                 current_roc_year = datetime.datetime.now().year - 1911
                 
-                # 往回搜尋最近 4 個年份 (例如 115, 114, 113, 112)
                 for year in range(current_roc_year, current_roc_year - 4, -1):
                     api_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/regular_api.php?stk_code={question}&Syear={year}"
-                    print(f"[上櫃 TPEx] 嘗試查詢 {year} 年 (民國) API...")
-                    
                     api_res = httpx.get(api_url, headers=headers, timeout=10.0)
                     if api_res.status_code == 200:
                         try:
                             api_json = api_res.json()
                             if "aaData" in api_json and len(api_json["aaData"]) > 0:
                                 tpex_pdf_url = None
-                                
-                                # 遍歷該年度的所有紀錄
                                 for row in api_json["aaData"]:
                                     row_str = str(row)
                                     pdf_match = re.search(r'(doc/[^\'"]+\.pdf|[^\'"]+\.pdf)', row_str, re.IGNORECASE)
                                     if pdf_match:
-                                        raw_path = pdf_match.group(1)
-                                        raw_path = urllib.parse.unquote(raw_path)
-                                        
+                                        raw_path = urllib.parse.unquote(pdf_match.group(1))
                                         if raw_path.startswith("http"):
                                             tpex_pdf_url = raw_path
                                         elif raw_path.startswith("doc/"):
@@ -141,17 +134,47 @@ def handle_message(event):
                                         break
                                 
                                 if tpex_pdf_url:
-                                    print(f"[上櫃 TPEx] 在 {year} 年找到 PDF 網址: {tpex_pdf_url}")
+                                    print(f"[上櫃 TPEx] 找到 PDF 網址: {tpex_pdf_url}")
                                     tpex_res = httpx.get(tpex_pdf_url, headers=headers, follow_redirects=True, timeout=10.0)
                                     if tpex_res.status_code == 200 and tpex_res.content.startswith(b"%PDF"):
                                         print(f"[上櫃 TPEx] 成功取得 PDF 檔案！")
                                         pdf_content = tpex_res.content
-                                        break  # 成功抓到 PDF，跳出年份迴圈
+                                        break
                         except Exception as json_err:
-                            print(f"[上櫃 TPEx] 解析 API 失敗: {json_err}")
+                            pass
+
+            # --------------------------------------------------
+            # 階段 3：前兩者皆失敗，調用公開資訊觀測站 (MOPS) API
+            # --------------------------------------------------
+            if not pdf_content:
+                print(f"[MOPS 觀測站] 開始從公開資訊觀測站查詢 {question}...")
+                mops_url = "https://mops.twse.com.tw/mops/web/ajax_t100sb07_1"
+                import datetime
+                current_roc_year = datetime.datetime.now().year - 1911
                 
-                if not pdf_content:
-                    print("[上櫃 TPEx] 過去 4 年內均未查到可用的法說會簡報 PDF")
+                # 向 MOPS 發送 POST 請求
+                payload = {
+                    "encodeRequestParam": "1",
+                    "step": "1",
+                    "firstin": "1",
+                    "co_id": question,
+                    "year": str(current_roc_year)
+                }
+                
+                mops_res = httpx.post(mops_url, data=payload, headers=headers, timeout=10.0)
+                if mops_res.status_code == 200:
+                    import re
+                    # 從 MOPS 回傳 HTML 中解析 PDF 檔名
+                    pdf_matches = re.findall(r"(\d+_\d+_[E|\d]+\.pdf)", mops_res.text, re.IGNORECASE)
+                    if pdf_matches:
+                        latest_pdf = pdf_matches[0]
+                        mops_pdf_url = f"https://mops.twse.com.tw/nas/STR/{latest_pdf}"
+                        print(f"[MOPS 觀測站] 找到最新簡報 PDF 網址: {mops_pdf_url}")
+                        
+                        mops_pdf_res = httpx.get(mops_pdf_url, headers=headers, timeout=10.0)
+                        if mops_pdf_res.status_code == 200 and mops_pdf_res.content.startswith(b"%PDF"):
+                            print(f"[MOPS 觀測站] 成功取得 PDF 檔案！")
+                            pdf_content = mops_pdf_res.content
 
             # 3. 檢查最終是否有取得合格的 PDF 內容
             if not pdf_content:
