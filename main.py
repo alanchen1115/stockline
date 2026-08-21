@@ -187,7 +187,7 @@ def handle_message(event):
                 prompt = f"這是一份台股『{question}』的法人說明會簡報，請協助依據系統指令做專業建議！"
                 
                 completion = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.5-flash",
                     contents=[sample_doc, prompt],
                     config=generation_config
                 ).text
@@ -197,7 +197,7 @@ def handle_message(event):
                 search_context = ""
                 try:
                     from duckduckgo_search import DDGS
-                    query = f"{question} 股票 最新股價 營收 三大法人 新聞"
+                    query = f"{question} 股票 最新股價 營收 三大法人 新聞 資料日期"
                     print(f"[DuckDuckGo] 開始搜尋: {query}")
                     
                     results = list(DDGS().text(query, max_results=5))
