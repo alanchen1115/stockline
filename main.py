@@ -84,36 +84,53 @@ def handle_message(event):
         try: 
             question = event.message.text.strip()
             print(f"\n--- [開始處理查詢] 股票代碼: {question} ---")
-            
 # 建立完整模擬真實瀏覽器的 Header
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Referer": "https://www.tpex.org.tw/",
-                "Connection": "keep-alive"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.tpex.org.tw/"
             }
 
-            # 1. 嘗試上市 (TWSE)
+            # 1. 先嘗試上市 (TWSE)
             twse_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
             print(f"[上市 TWSE] 嘗試下載: {twse_url}")
             doc_data = httpx.get(twse_url, headers=headers, follow_redirects=True, timeout=10.0)
             print(f"[上市 TWSE] 回傳狀態碼: {doc_data.status_code}")
-            
-            # 2. 若上市抓不到，嘗試上櫃 (TPEx)
-            if doc_data.status_code != 200:
-                # 方案 A: 嘗試預設上櫃簡報路徑
-                tpex_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{question}_ch.pdf"
-                print(f"[上櫃 TPEx] 嘗試下載: {tpex_url}")
-                doc_data = httpx.get(tpex_url, headers=headers, follow_redirects=True, timeout=10.0)
-                print(f"[上櫃 TPEx] 回傳狀態碼: {doc_data.status_code}")
 
-                # 方案 B: 若方案 A 回傳 400/404，嘗試上櫃備用下載路徑
-                if doc_data.status_code != 200:
-                    tpex_alt_url = f"https://www.tpex.org.tw/web/stock/aftertrading/corp_brief/brief_download.php?stk_code={question}"
-                    print(f"[上櫃 TPEx 備用] 嘗試下載: {tpex_alt_url}")
-                    doc_data = httpx.get(tpex_alt_url, headers=headers, follow_redirects=True, timeout=10.0)
-                    print(f"[上櫃 TPEx 備用] 回傳狀態碼: {doc_data.status_code}")
+            # 2. 若上市抓不到 (status != 200)，動態查詢上櫃 (TPEx) 的簡報 API
+            if doc_data.status_code != 200:
+                print(f"[上櫃 TPEx] 開始透過 API 查詢 {question} 的簡報網址...")
+                api_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/regular_api.php?stk_code={question}"
+                
+                api_res = httpx.get(api_url, headers=headers, timeout=10.0)
+                
+                if api_res.status_code == 200:
+                    try:
+                        api_json = api_res.json()
+                        # 檢查 API 是否有回傳簡報資料
+                        if "aaData" in api_json and len(api_json["aaData"]) > 0:
+                            # 取得最新一次法說會的 PDF 檔名或相對路徑
+                            # 櫃買中心 API 的 JSON 中通常會在第 5 或第 6 個欄位包含 PDF 連結檔名
+                            pdf_file_info = api_json["aaData"][0] 
+                            
+                            # 抓取 API 回傳的 PDF 檔名 (例如 "1130315_8069.pdf")
+                            # 透過 parse 或正規表達式提取 .pdf 網址
+                            import re
+                            pdf_match = re.search(r'doc/([^\'"]+\.pdf)', str(pdf_file_info))
+                            
+                            if pdf_match:
+                                pdf_filename = pdf_match.group(1)
+                                tpex_pdf_url = f"https://www.tpex.org.tw/web/regular_emerging/corporate_info/regular/doc/{pdf_filename}"
+                                print(f"[上櫃 TPEx] 成功找到 PDF 網址: {tpex_pdf_url}")
+                                
+                                # 下載真正的上櫃 PDF
+                                doc_data = httpx.get(tpex_pdf_url, headers=headers, follow_redirects=True, timeout=10.0)
+                                print(f"[上櫃 TPEx] PDF 下載狀態碼: {doc_data.status_code}")
+                            else:
+                                print("[上櫃 TPEx] 找到法說會紀錄，但未包含 PDF 檔案連結")
+                        else:
+                            print("[上櫃 TPEx] 該公司未在上櫃系統找到法說會簡報紀錄")
+                    except Exception as json_err:
+                        print(f"[上櫃 TPEx] 解析 API JSON 失敗: {json_err}")
 
             # 3. 檢查最終抓取結果
             if doc_data.status_code != 200:
