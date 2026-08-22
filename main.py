@@ -85,7 +85,7 @@ def handle_message(event):
         try: 
             # 取得使用者輸入的文字
             question = event.message.text
-            doc_url = "https://www.twse.com.tw/pdf/ch/"+question+"_ch.pdf"
+            doc_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
             doc_data = httpx.get(doc_url)
             if doc_data.status_code != 200:
                 completion = '查無股票代號！請輸入台灣上市股票代號！'
