@@ -132,9 +132,8 @@ def handle_message(event):
                 # 模式 B：無上市 PDF (包含上櫃股票 Https://tpex.org.tw 或未上傳簡報者)
                 # 不下載 PDF，直接由 Gemini 連網搜尋櫃買中心與最新股價籌碼資訊
                 prompt = (
-                    f"請透過網路搜尋（包含櫃買中心 Https://tpex.org.tw 或證交所最新資料）台灣股票代號/公司名稱『{question}』最新的即時個股資訊"
-                    f"（包含當前股價價量表現、近月營收財報、三大法人與融資融券籌碼動態、最新新聞與未來展望），"
-                    f"並嚴格依照系統指令（分項說明價量表現、籌碼面、財務資訊、展望與建議）產出專業分析報告！"
+                    f"請透過網路搜尋 https://www.tpex.org.tw/zh-tw/mainboard/listed/company-detail.html?{question} 最新的即時個股資訊!"
+                    f"你是投信分析師，請使用繁體中文2000字以內，分項說明公司股市價量表現、融資融卷、內外資進出及財務資訊，並分析近期公司股市展望給投資人具體的專業建議,包含股價支撐與壓力!"
                 )
                 contents = [prompt]
 
