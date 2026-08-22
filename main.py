@@ -83,30 +83,74 @@ def handle_message(event):
     # 檢查是否正在與使用者交談
     elif working_status:
         try: 
-            # 取得使用者輸入的文字
-            question = event.message.text
-            doc_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
-            doc_data = httpx.get(doc_url)
-            if doc_data.status_code != 200:
-                completion = '查無股票代號！請輸入台灣上市股票代號！'
-            else:
+            # 取得使用者輸入的股票代號（自動去除前後空白）
+            question = event.message.text.strip()
+            
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+
+            pdf_content = None
+
+            # --------------------------------------------------
+            # 1. 僅嘗試下載上市 (TWSE) 簡報 PDF
+            # --------------------------------------------------
+            twse_url = f"https://www.twse.com.tw/pdf/ch/{question}_ch.pdf"
+            try:
+                res = httpx.get(twse_url, headers=headers, follow_redirects=True, timeout=8.0)
+                # 驗證 HTTP 狀態碼為 200 且檔案開頭為 %PDF
+                if res.status_code == 200 and res.content.startswith(b"%PDF"):
+                    pdf_content = res.content
+            except Exception:
+                pdf_content = None
+
+            # --------------------------------------------------
+            # 2. 設定開啟 Google Search 實時網路查詢功能的 Config
+            # --------------------------------------------------
+            search_generation_config = genai.types.GenerateContentConfig(
+                max_output_tokens=5000,
+                temperature=0.1,
+                top_p=0.2,
+                thinking_config=thinking_config,
+                system_instruction=system_instruction,
+                tools=[{"google_search": {}}]  # <<-- 開啟 Google Search 實時連網搜尋
+            )
+
+            # --------------------------------------------------
+            # 3. 呼叫 Gemini 生成分析報告 (PDF 模式 vs 上櫃/連網查詢模式)
+            # --------------------------------------------------
+            if pdf_content:
+                # 模式 A：成功抓到上市 PDF 簡報
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
-                    temp_file.write(doc_data.content)
+                    temp_file.write(pdf_content)
                     temp_file_path = temp_file.name
                     sample_doc = client.files.upload(file=temp_file_path)
-                    prompt = "請給專業建議!"               
-                # gemini-2.5-flash
-                completion = client.models.generate_content(
-                                    model="gemini-3.5-flash",
-                                    contents=[sample_doc, prompt],
-                                    config=generation_config).text
-            # 取得生成結果
+                    
+                prompt = f"這是一份台灣上市股票『{question}』的法人說明會簡報，請結合這份簡報與最新網路資訊，依系統指令給予專業建議！"
+                contents = [sample_doc, prompt]
+            else:
+                # 模式 B：無上市 PDF (包含上櫃股票 Https://tpex.org.tw 或未上傳簡報者)
+                # 不下載 PDF，直接由 Gemini 連網搜尋櫃買中心與最新股價籌碼資訊
+                prompt = (
+                    f"請透過網路搜尋（包含櫃買中心 Https://tpex.org.tw 或證交所最新資料）台灣股票代號/公司名稱『{question}』最新的即時個股資訊"
+                    f"（包含當前股價價量表現、近月營收財報、三大法人與融資融券籌碼動態、最新新聞與未來展望），"
+                    f"並嚴格依照系統指令（分項說明價量表現、籌碼面、財務資訊、展望與建議）產出專業分析報告！"
+                )
+                contents = [prompt]
+
+            # 呼叫 Gemini 模型
+            completion = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config=search_generation_config
+            ).text
+
             out = completion
-        except:
-            # 處理錯誤
-            out = "Gemini執行出錯!請換個說法！" 
-  
-        # 回覆生成結果
+
+        except Exception as e:
+            out = f"Gemini執行出錯! 錯誤細節: {str(e)}"
+
+        # 回覆 LINE 使用者
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=out))
