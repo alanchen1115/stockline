@@ -113,7 +113,7 @@ def handle_message(event):
                 top_p=0.2,
                 thinking_config=thinking_config,
                 system_instruction=system_instruction,
-                tools=[{"google_search": {}}]  # <<-- 開啟 Google Search 實時連網搜尋
+#                tools=[{"google_search": {}}]  # <<-- 開啟 Google Search 實時連網搜尋
             )
 
             # --------------------------------------------------
@@ -139,7 +139,7 @@ def handle_message(event):
 
             # 呼叫 Gemini 模型
             completion = client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model="gemini-3.5-flash-lite",
                 contents=contents,
                 config=search_generation_config
             ).text
